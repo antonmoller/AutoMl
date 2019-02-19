@@ -8,7 +8,7 @@ from sklearn.linear_model import LogisticRegression, RidgeClassifier
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis, QuadraticDiscriminantAnalysis
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.tree import DecisionTreeClassifier, ExtraTreeClassifier
-from sklearn.ensemble import AdaBoostClassifier, GradientBoostingClassifier, BaggingClassifier, RandomForestClassifier
+from sklearn.ensemble import AdaBoostClassifier, GradientBoostingClassifier, BaggingClassifier, RandomForestClassifier, VotingClassifier
 from sklearn.pipeline import make_pipeline
 from sklearn.model_selection import cross_val_score
 from hyperopt import fmin, tpe, hp, STATUS_OK, STATUS_FAIL, Trials
@@ -18,7 +18,7 @@ import preprocessing
 
 X_train, Y_train = preprocessing.preprocess_data_train()
 test = preprocessing.preprocess_data_test()
-MAX_EVALS = 10
+MAX_EVALS = 50
 NO_PIPELINES = 50
 FOLDS = 10
 SCORING = 'accuracy'
@@ -104,11 +104,29 @@ def objective(pipeline):
 
     return {'loss' : 1 - score.mean(), 'status' : STATUS_OK}
 
+# TODO: FIND WAY SUCH THAT THE MODELS DOES NOT NEED TO BE REFIT
+# TODO: Add no optimizer if score is decreased
 def create_ensemble(ens_size):
-    pipelines = BEST_PIPELINES
+    pipelines = BEST_PIPELINES.values()
+    old_score = 0
+    highest_score, best_pipeline = 0, None
+    estimators = []
 
     for i in range(0, ens_size):
+        for pipeline in pipelines:
+            estimators.append(('pipeline' + str(i), pipeline))
+            ensemble = VotingClassifier(estimators)
+            score = cross_val_score(ensemble, X_train, Y_train, scoring=SCORING, cv=FOLDS, n_jobs=-1).mean()
+            del estimators[-1]
+            print(score)
 
+            if score > highest_score:
+                highest_score = score
+                best_pipeline = pipeline
+
+        estimators.append(('pipeline' + str(i), best_pipeline))
+
+    return VotingClassifier(estimators)
 
 trials = Trials()
 best = fmin(objective, space=space, algo=tpe.suggest, max_evals=MAX_EVALS, trials=trials,
@@ -116,3 +134,9 @@ best = fmin(objective, space=space, algo=tpe.suggest, max_evals=MAX_EVALS, trial
 print(best)
 print(1 - trials.best_trial['result']['loss'])
 
+print(cross_val_score(create_ensemble(10), X_train, Y_train, scoring=SCORING, cv=FOLDS).mean())
+
+
+# model.fit(X_train, Y_train)
+# result = model.predict(X_test)
+#print(''.join(str(i) for i in result))
